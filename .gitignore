@@ -20,6 +20,7 @@ www/static/signals.css
 
 # Fetched and built platform inputs.
 platform/targets/
+platform/targets-native/
 
 # Never written by this repository's tooling, kept out of commits anyway.
 .test-out/
