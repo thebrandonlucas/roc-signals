@@ -8,15 +8,19 @@ take before proposing a change there.
 - `platform/main-native.roc`: a second platform root over the same engine,
   with only mount, turns and teardown.
 - `platform/Native.roc`: the widgets (`column`, `row`, `label`, `label_s`,
-  `button`), ordinary engine elements in the `urn:roc-signals:native`
-  namespace.
+  `button`, `button_s`, `field`), ordinary engine elements in the
+  `urn:roc-signals:native` namespace. `Engine.each` works with them
+  unchanged: the host applies keyed rows (`TEMPLATE`, `INST`, row holes,
+  `CLEAR`) as `runtime.mjs` does.
 - `platform/host/native_runtime.zig`: the host and the command applier,
   shared by both systems. `native_mac.zig` and `native_gtk.zig` are each
   toolkit's widget operations and event loop; both load their toolkit with
   `dlopen`, so Roc's link needs no system UI libraries.
 
-Only structural commands are drawn; keyed lists, attributes, text input and
-effects are refused with a message.
+Two apps: `counter/` (state and buttons) and `todos/` (a text field, keyed
+rows added and removed). Not drawn yet, and refused with a message: table
+views' properties, attributes other than a field's `value`, focus, effects
+(timers, HTTP, storage) and view transitions.
 
 ## macOS (Apple silicon)
 
@@ -57,9 +61,13 @@ roc build --opt=dev --target=arm64glibc native/counter/main.roc --output=.build/
 
 ## Self-test
 
-`ROC_NATIVE_SCRIPT="+,+,-"` clicks the buttons with those titles through the
-toolkit's own click path. It prints the widget tree the toolkit holds before
-and after, then quits.
+`ROC_NATIVE_SCRIPT="type:Buy milk,Add,Remove Buy milk"` runs steps through the
+toolkit's own event paths:
+- `type:TEXT` sets the first field's text and raises its edit event, as
+  typing does.
+- Any other step clicks the button with that title.
+
+It prints the widget tree the toolkit holds before and after, then quits.
 
 - `ROC_NATIVE_SNAPSHOT=out.pdf` also renders the window (macOS only).
 - `ROC_NATIVE_STAY=1` keeps the window open, so you can take a screenshot

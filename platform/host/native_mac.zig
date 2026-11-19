@@ -1,7 +1,7 @@
 //! SPIKE: the macOS backend of the experimental native host
 //! (`native_runtime.zig` holds everything that is not AppKit). Widgets are
 //! AppKit views: `NSStackView` for a column or row, `NSTextField` labels and
-//! `NSButton`s. AppKit is reached through the Objective-C runtime, loaded
+//! fields, and `NSButton`s. AppKit is reached through the Objective-C runtime, loaded
 //! with `dlopen`, so Roc's link of the static host needs no framework flags.
 const std = @import("std");
 const rt = @import("native_runtime.zig");
@@ -103,10 +103,36 @@ pub const Backend = struct {
         return send(id, send(id, cls("NSTextField"), "labelWithString:", .{nsString("")}), "retain", .{});
     }
 
-    pub fn button(n: u32) View {
+    pub fn button(key: rt.Key) View {
         const b = send(id, cls("NSButton"), "buttonWithTitle:target:action:", .{ nsString(""), target, sel("press:") });
-        send(void, b, "setTag:", .{@as(isize, n)});
+        send(void, b, "setTag:", .{@as(isize, @intCast(key))});
         return send(id, b, "retain", .{});
+    }
+
+    /// An editable text field whose edits reach `controlTextDidChange:`.
+    pub fn field(key: rt.Key) View {
+        const f = send(id, send(id, cls("NSTextField"), "textFieldWithString:", .{nsString("")}), "retain", .{});
+        send(void, f, "setTag:", .{@as(isize, @intCast(key))});
+        send(void, f, "setDelegate:", .{target});
+        const width = send(id, send(id, f, "widthAnchor", .{}), "constraintGreaterThanOrEqualToConstant:", .{@as(f64, 220)});
+        send(void, width, "setActive:", .{true});
+        return f;
+    }
+
+    pub fn setField(view: View, text: []const u8) void {
+        send(void, view, "setStringValue:", .{nsString(text)});
+    }
+
+    pub fn fieldText(view: View) []const u8 {
+        return utf8(send(id, view, "stringValue", .{}));
+    }
+
+    /// Typing as AppKit reports it: the field's text changes, then the
+    /// control posts the notification its delegate observes.
+    pub fn typeInto(view: View, text: []const u8) void {
+        send(void, view, "setStringValue:", .{nsString(text)});
+        const center = send(id, cls("NSNotificationCenter"), "defaultCenter", .{});
+        send(void, center, "postNotificationName:object:", .{ nsString("NSControlTextDidChangeNotification"), view });
     }
 
     pub fn insert(parent: View, child: View, index: usize, _: View) void {
@@ -164,7 +190,8 @@ fn dumpView(view: id, depth: usize) void {
     if (std.mem.eql(u8, class_name, "NSButton")) {
         rt.dumpLine(depth, "button \"{s}\"", .{utf8(send(id, view, "title", .{}))});
     } else if (std.mem.eql(u8, class_name, "NSTextField")) {
-        rt.dumpLine(depth, "label \"{s}\"", .{utf8(send(id, view, "stringValue", .{}))});
+        const kind = if (send(bool, view, "isEditable", .{})) "field" else "label";
+        rt.dumpLine(depth, "{s} \"{s}\"", .{ kind, utf8(send(id, view, "stringValue", .{})) });
     } else if (std.mem.eql(u8, class_name, "NSStackView")) {
         rt.dumpLine(depth, "{s}", .{if (send(isize, view, "orientation", .{}) == 1) "column" else "row"});
         const subs = send(id, view, "arrangedSubviews", .{});
@@ -179,6 +206,12 @@ fn pressed(_: id, _: SEL, sender: id) callconv(.c) void {
     rt.press(@intCast(send(isize, sender, "tag", .{})));
 }
 
+/// A field's delegate: each edit, with the field's whole text.
+fn edited(_: id, _: SEL, note: id) callconv(.c) void {
+    const f = send(id, note, "object", .{});
+    rt.input(@intCast(send(isize, f, "tag", .{})), utf8(send(id, f, "stringValue", .{})));
+}
+
 fn script(_: id, _: SEL, _: id) callconv(.c) void {
     rt.runScript();
 }
@@ -191,6 +224,7 @@ fn makeTarget() id {
     const c = objc_allocateClassPair(cls("NSObject"), "RocSignalsTarget", 0) orelse rt.die("cannot define the target class", .{});
     _ = class_addMethod(c, sel("press:"), @ptrCast(&pressed), "v@:@");
     _ = class_addMethod(c, sel("script:"), @ptrCast(&script), "v@:@");
+    _ = class_addMethod(c, sel("controlTextDidChange:"), @ptrCast(&edited), "v@:@");
     _ = class_addMethod(c, sel("applicationShouldTerminateAfterLastWindowClosed:"), @ptrCast(&quitAfterLastWindow), "B@:@");
     objc_registerClassPair(c);
     return send(id, send(id, c, "alloc", .{}), "init", .{});
@@ -209,7 +243,7 @@ fn cMain(_: c_int, _: [*]const [*:0]const u8) callconv(.c) c_int {
     send(void, app, "setDelegate:", .{target});
 
     // Titled | closable | miniaturizable | resizable; buffered backing.
-    window = send(id, send(id, cls("NSWindow"), "alloc", .{}), "initWithContentRect:styleMask:backing:defer:", .{ NSRect{ .x = 200, .y = 200, .w = 420, .h = 160 }, @as(usize, 15), @as(usize, 2), false });
+    window = send(id, send(id, cls("NSWindow"), "alloc", .{}), "initWithContentRect:styleMask:backing:defer:", .{ NSRect{ .x = 200, .y = 200, .w = 420, .h = 320 }, @as(usize, 15), @as(usize, 2), false });
     send(void, window, "setTitle:", .{nsString("Roc Signals")});
 
     // The mount root (node 0) is a column that fills the window.

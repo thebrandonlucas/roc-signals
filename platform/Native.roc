@@ -35,6 +35,27 @@ Native := [].{
 	button : Str, Engine.Handler(ctx) -> Engine.Elem(ctx)
 	button = |title, handler| Engine.element(Native.widget("button"), [Engine.on(Native.press, handler)], [Engine.text(title)])
 
+	## A push button whose title follows a signal.
+	button_s : Engine.Signal(ctx, Str), Engine.Handler(ctx) -> Engine.Elem(ctx)
+	button_s = |title, handler| Engine.element(Native.widget("button"), [Engine.on(Native.press, handler)], [Engine.text_s(title)])
+
+	## A single-line text entry. `value` is the text the app decides the
+	## entry shows; each edit the user makes delivers the native `input`
+	## event, whose payload is the entry's whole text, to `on_input` as one
+	## turn. The host writes `value` into the entry only when it differs from
+	## what the entry already shows, so writing back what the user typed
+	## never disturbs the caret.
+	field : Engine.Signal(ctx, Str), Engine.Handler(ctx) -> Engine.Elem(ctx)
+	field = |value, on_input| Engine.element(Native.widget("field"), [Engine.attr_s(Native.value_attr, value), Engine.on(Native.input, on_input)], [])
+
+	## The attribute that carries a field's text.
+	value_attr : Web.AttrName
+	value_attr = Web.AttrName.from_str("value") ?? crash "internal: value is a valid attribute name"
+
+	## An edit of a native text entry.
+	input : Web.EventType
+	input = Web.EventType.from_str("input") ?? crash "internal: input is a valid event name"
+
 	## Activation of a native control.
 	press : Web.EventType
 	press = Web.EventType.from_str("press") ?? crash "internal: press is a valid event name"

@@ -1,7 +1,7 @@
 //! SPIKE: the Linux backend of the experimental native host
 //! (`native_runtime.zig` holds everything that is not GTK). Widgets are
-//! GTK 4 widgets: `GtkBox` for a column or row, `GtkLabel`s and
-//! `GtkButton`s. GTK is loaded with `dlopen` (`libgtk-4.so.1`), so Roc's
+//! GTK 4 widgets: `GtkBox` for a column or row, `GtkLabel`s, `GtkEntry`
+//! fields and `GtkButton`s. GTK is loaded with `dlopen` (`libgtk-4.so.1`), so Roc's
 //! link of the static host needs only glibc, and a missing GTK is a clear
 //! message at start rather than a loader failure.
 const std = @import("std");
@@ -25,6 +25,7 @@ const Gtk = struct {
     window_set_title: *const fn (Ptr, Str) callconv(.c) void,
     window_set_default_size: *const fn (Ptr, c_int, c_int) callconv(.c) void,
     window_set_child: *const fn (Ptr, Ptr) callconv(.c) void,
+    window_get_child: *const fn (Ptr) callconv(.c) Ptr,
     window_present: *const fn (Ptr) callconv(.c) void,
     box_new: *const fn (c_int, c_int) callconv(.c) Ptr,
     box_insert_child_after: *const fn (Ptr, Ptr, Ptr) callconv(.c) void,
@@ -35,6 +36,10 @@ const Gtk = struct {
     button_new_with_label: *const fn (Str) callconv(.c) Ptr,
     button_set_label: *const fn (Ptr, Str) callconv(.c) void,
     button_get_label: *const fn (Ptr) callconv(.c) ?Str,
+    entry_new: *const fn () callconv(.c) Ptr,
+    editable_get_text: *const fn (Ptr) callconv(.c) ?Str,
+    editable_set_text: *const fn (Ptr, Str) callconv(.c) void,
+    widget_set_size_request: *const fn (Ptr, c_int, c_int) callconv(.c) void,
     widget_set_halign: *const fn (Ptr, c_int) callconv(.c) void,
     widget_set_valign: *const fn (Ptr, c_int) callconv(.c) void,
     widget_set_margin_start: *const fn (Ptr, c_int) callconv(.c) void,
@@ -92,10 +97,34 @@ pub const Backend = struct {
         return l;
     }
 
-    pub fn button(n: u32) View {
+    pub fn button(key: rt.Key) View {
         const b = gtk.g_object_ref_sink(gtk.button_new_with_label(""));
-        _ = gtk.g_signal_connect_data(b, "clicked", @ptrCast(&clicked), @ptrFromInt(@as(usize, n) + 1), null, 0);
+        _ = gtk.g_signal_connect_data(b, "clicked", @ptrCast(&clicked), @ptrFromInt(@as(usize, @intCast(key)) + 1), null, 0);
         return b;
+    }
+
+    /// A single-line entry whose edits reach `changed`.
+    pub fn field(key: rt.Key) View {
+        const e = gtk.g_object_ref_sink(gtk.entry_new());
+        gtk.widget_set_size_request(e, 220, -1);
+        _ = gtk.g_signal_connect_data(e, "changed", @ptrCast(&changed), @ptrFromInt(@as(usize, @intCast(key)) + 1), null, 0);
+        return e;
+    }
+
+    pub fn setField(view: View, text: []const u8) void {
+        const z = cstr(text);
+        defer rt.gpa.free(z);
+        gtk.editable_set_text(view, z);
+    }
+
+    pub fn fieldText(view: View) []const u8 {
+        return std.mem.span(gtk.editable_get_text(view) orelse "");
+    }
+
+    /// Typing as GTK reports it: the entry's text changes and it emits
+    /// `changed`, as it does for each keystroke.
+    pub fn typeInto(view: View, text: []const u8) void {
+        setField(view, text);
     }
 
     pub fn insert(parent: View, child: View, _: usize, previous: View) void {
@@ -134,8 +163,7 @@ pub const Backend = struct {
     }
 
     pub fn dump() void {
-        var child = gtk.widget_get_first_child(window);
-        while (child != null) : (child = gtk.widget_get_next_sibling(child)) dumpWidget(child, 0);
+        dumpWidget(gtk.window_get_child(window), 0);
     }
 
     /// Not yet: GTK paints a toplevel only to its surface. Take the
@@ -155,6 +183,8 @@ fn dumpWidget(w: Ptr, depth: usize) void {
     const type_name = std.mem.span(gtk.g_type_name_from_instance(w));
     if (std.mem.eql(u8, type_name, "GtkButton")) {
         rt.dumpLine(depth, "button \"{s}\"", .{Backend.buttonText(w)});
+    } else if (std.mem.eql(u8, type_name, "GtkEntry")) {
+        rt.dumpLine(depth, "field \"{s}\"", .{Backend.fieldText(w)});
     } else if (std.mem.eql(u8, type_name, "GtkLabel")) {
         rt.dumpLine(depth, "label \"{s}\"", .{std.mem.span(gtk.label_get_text(w) orelse "")});
     } else if (std.mem.eql(u8, type_name, "GtkBox")) {
@@ -170,6 +200,11 @@ fn dumpWidget(w: Ptr, depth: usize) void {
 /// `clicked`: the data is the button's node id plus one (never null).
 fn clicked(_: Ptr, data: Ptr) callconv(.c) void {
     rt.press(@intCast(@intFromPtr(data) - 1));
+}
+
+/// `changed` on an entry: the data is the field's node key plus one.
+fn changed(editable: Ptr, data: Ptr) callconv(.c) void {
+    rt.input(@intCast(@intFromPtr(data) - 1), std.mem.span(gtk.editable_get_text(editable) orelse ""));
 }
 
 fn closeRequest(_: Ptr, _: Ptr) callconv(.c) bool {
@@ -191,7 +226,7 @@ fn cMain(_: c_int, _: [*]const [*:0]const u8) callconv(.c) c_int {
 
     window = gtk.window_new();
     gtk.window_set_title(window, "Roc Signals");
-    gtk.window_set_default_size(window, 420, 160);
+    gtk.window_set_default_size(window, 420, 320);
     _ = gtk.g_signal_connect_data(window, "close-request", @ptrCast(&closeRequest), null, null, 0);
 
     // The mount root (node 0) is a column that fills the window.
