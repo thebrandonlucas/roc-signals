@@ -18,8 +18,8 @@ take before proposing a change there.
   `dlopen`, so Roc's link needs no system UI libraries.
 
 Two apps: `counter/` (state and buttons) and `todos/` (a text field, keyed
-rows added and removed). Not drawn yet, and refused with a message: table
-views' properties, attributes other than a field's `value`, focus, effects
+rows added and removed). Not drawn yet, and refused with a message: element
+properties (`PROP`, `HPROP`), attributes other than a field's `value`, focus, effects
 (timers, HTTP, storage) and view transitions.
 
 ## macOS (Apple silicon)
